@@ -93,20 +93,64 @@ int get_random_coord()
     return (rand() % (ROWS*COLS + 1));
 }
 
+void color_cell(char c)
+{
+    putchar('\033');
+    putchar('[');
+    switch (c) {
+    case '1':
+        putchar('3'); putchar('4'); // blue
+        break;
+    case '2':
+        putchar('3'); putchar('2'); // green 
+        break;
+    case '3':
+        putchar('3'); putchar('1'); // red
+        break;
+    case '4':
+        putchar('9'); putchar('4'); // dark blue
+        break;
+    case '5':
+        putchar('9'); putchar('1'); // dark red
+        break;
+    case '6':
+        putchar('3'); putchar('6'); // teal
+        break;
+    case '7':
+        putchar('3'); putchar('0'); // black
+        break;
+    case '8':
+    case '[':
+    case ']':
+    case 'F':
+        putchar('3'); putchar('7');
+        break;
+    default:
+        putchar('3'); putchar('7');
+    }
+    putchar('m');
+    putchar(c);
+    putchar('\033'); putchar('['); putchar('0'); putchar('m');
+}
+
 /*
  * By selector, I mean `[<cell>]`. x and y are the coordinates of the selector.
  * reset determines wether the cursor is reseted to the top position.
  */
 void render(char *buff, bool reset)
 {
-    printf("\n");
+    putchar('\n');
     for (size_t i = 0; i < ROWS; ++i) {
         for (size_t j = 0; j < COLS; ++j) {
             char c = buff[i * COLS + j];
             if (cursor.x == j && cursor.y == i) {
                 putchar('[');
-                putchar(c);
+                color_cell(c);
                 putchar(']');
+            } else if (isdigit(c)) {
+                putchar(' ');
+                color_cell(c);
+                putchar(' ');
             } else {
                 putchar(' ');
                 putchar(c);
@@ -273,8 +317,8 @@ int main()
     place_numbers();
     
     printf("WASD     => directions\n");
-    printf("enter    => select\n");
-    printf("f        => flag\n");
+    printf("<ENTER>  => select\n");
+    printf("<SPACE>  => flag\n");
     printf("c        => close\n");
     render(game, true);
     char input = ' ';
@@ -307,7 +351,7 @@ int main()
                     reveal_area();
                 }
             } break;
-        case 'f': // flag
+        case ' ': // flag
             if (is_pos_valid(cursor.x, cursor.y)) {
                 AT(game, cursor.x, cursor.y) = FLAGSYM;
                 if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
