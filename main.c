@@ -66,7 +66,7 @@ unsigned int clear_cells_revealed = 0;
         tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
         
         if (ch == 10 || ch == 13) {
-            return '\n'
+            return '\n';
         }
         return ch;
     }
