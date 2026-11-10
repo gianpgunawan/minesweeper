@@ -14,100 +14,89 @@
 
 #define AT(buff, x, y) buff[(y) * COLS + (x)]
 
-char FINISHED_GAME[ROWS*COLS];
-char GAME[ROWS*COLS];
+char finished_game[ROWS*COLS];
+char game[ROWS*COLS];
 
-size_t MINES[AMOUNT_OF_MINES];
+size_t mines[AMOUNT_OF_MINES];
 
 const char MINESYM = '*';
 const char BLANKSYM = '-';
 const char CLEARSYM = ' ';
+const char FLAGSYM = 'F';
+
+// This struct indicates the position of the selector, that is this `[<cell>]`
+struct {
+    int x;
+    int y;
+} cursor = {0};
 
 bool should_close = false;
 
-void init_screen()
+unsigned int bombs_flagged = 0;
+unsigned int clear_cells_revealed = 0;
+
+void init_board()
 {
     for (size_t i = 0; i < COLS; ++i) {
         for (size_t j = 0; j < ROWS; ++j) {
-            FINISHED_GAME[j * COLS + i] = BLANKSYM;
-            GAME[j * COLS + i] = BLANKSYM;
+            finished_game[j * COLS + i] = BLANKSYM;
+            game[j * COLS + i] = BLANKSYM;
         }
     }
 }
 
-void get_random(FILE *urandomfp, size_t *buffer)
+int get_random_coord()
 {
-    FILE *fp = urandomfp;
-    if (fp == NULL) {
-        fprintf(stderr, "file not found");
-        exit(1);
+    static bool init = false;
+    if (!init) {
+        init = true;
+        srand(time(NULL));
     }
 
-    fread(buffer, sizeof(size_t), 1, fp);
+    return (rand() % (ROWS*COLS + 1));
 }
 
-void render(char *buff)
-{
-    for (size_t i = 0; i < ROWS; ++i) {
-        for (size_t j = 0; j < COLS; ++j) {
-            printf("%c", buff[i * COLS + j]);
-        }
-        printf("\n");
-    }
-}
-
-void render_with_user_selection(char *buff, int x, int y, bool reset)
+/*
+ * By selector, I mean `[<cell>]`. x and y are the coordinates of the selector.
+ * reset determines wether the cursor is reseted to the top position.
+ */
+void render(char *buff, bool reset)
 {
     printf("\n");
     for (size_t i = 0; i < ROWS; ++i) {
         for (size_t j = 0; j < COLS; ++j) {
             char c = buff[i * COLS + j];
-            if (x == j && y == i)
-                printf("[%c]", c);
-            else
-                printf(" %c ", c);
-
+            if (cursor.x == j && cursor.y == i) {
+                putchar('[');
+                putchar(c);
+                putchar(']');
+            } else {
+                putchar(' ');
+                putchar(c);
+                putchar(' ');
+            }
         }
-        printf("\n");
+        putchar('\n');
     }
     if (reset) {
         printf("\x1b[%dA", ROWS + 2);
     }
 }
 
-void render_then_reset_cursor(char *buff)
-{
-    for (size_t i = 0; i < ROWS; ++i) {
-        for (size_t j = 0; j < COLS; ++j) {
-            printf("%c", buff[i * COLS + j]);
-        }
-        printf("\n");
-    }
-    printf("\x1b[%dA", ROWS);
-}
-
 void place_mines()
 {
-    FILE *fp = fopen("/dev/urandom", "rb");
-    if (fp == NULL) {
-        fprintf(stderr, "FP is NULL");
-        exit(1);
-    }
     for (size_t i = 0; i < AMOUNT_OF_MINES; ++i) {
-        size_t coord;
+        int coord;
 TRY_AGAIN:
-        get_random(fp, &coord);
-        coord = coord % (ROWS * COLS);
+        coord = get_random_coord();
 
-        if (FINISHED_GAME[coord] == MINESYM) {
+        if (finished_game[coord] == MINESYM) {
             goto TRY_AGAIN;
         }
 
-        FINISHED_GAME[coord] = MINESYM;
-        MINES[i] = coord;
+        finished_game[coord] = MINESYM;
+        mines[i] = coord;
     }
-
-    fclose(fp);
 }
 
 static inline bool is_pos_valid(int x, int y)
@@ -124,67 +113,67 @@ size_t count_adjacent_mines(size_t x, size_t y)
     tmpx = x - 1;
     tmpy = y + 1;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
     // north
     tmpx = x;
     tmpy = y + 1;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
     // northeast
     tmpx = x + 1;
     tmpy = y + 1;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
     // east
     tmpx = x + 1;
     tmpy = y;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
     // southeast
     tmpx = x + 1;
     tmpy = y - 1;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
     // south 
     tmpx = x;
     tmpy = y - 1;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
     // southwest 
     tmpx = x - 1;
     tmpy = y - 1;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
     // west
     tmpx = x - 1;
     tmpy = y;
     if (is_pos_valid(tmpx, tmpy)) {
-        if (AT(FINISHED_GAME, tmpx, tmpy) == MINESYM)
+        if (AT(finished_game, tmpx, tmpy) == MINESYM)
             total++;
     }
 
     return total;
 }
 
-void place_numbers(char *buff)
+void place_numbers()
 {
     for (size_t i = 0; i < COLS; ++i) {
         for (size_t j = 0; j < ROWS; ++j) {
-            if (AT(buff, i, j) != MINESYM) {
+            if (AT(finished_game, i, j) != MINESYM) {
                 size_t mines = count_adjacent_mines(i, j);
                 char sym;
                 if (mines == 0) {
@@ -192,14 +181,19 @@ void place_numbers(char *buff)
                 } else {
                     sym = (char)(48 + mines);
                 }
-                AT(buff, i, j) = sym;
+                AT(finished_game, i, j) = sym;
             }
         }
     }
 }
 
-void dfs(int x, int y)
+/*
+ * flood-fill the surrounding cells of selected cell 
+ */
+void reveal_area()
 {
+    int x = cursor.x;
+    int y = cursor.y;
     int visits[ROWS * COLS] = {0};
     int stackx[ROWS * COLS] = {0};
     int stacky[ROWS * COLS] = {0};
@@ -208,15 +202,16 @@ void dfs(int x, int y)
 
     stackx[countx++] = x;
     stacky[county++] = y;
-
+    AT(visits, x, y) = 1;
+    
     while(countx > 0) {
         x = stackx[--countx];
         y = stacky[--county];
-        AT(visits, x, y) = 1;
 
-        if (AT(FINISHED_GAME, x, y) == MINESYM) continue;
-        AT(GAME, x, y) = AT(FINISHED_GAME, x, y) == BLANKSYM ? CLEARSYM : AT(FINISHED_GAME, x, y);
-        if (isdigit(AT(GAME, x, y))) continue;
+        if (AT(finished_game, x, y) == MINESYM) continue;
+        AT(game, x, y) = AT(finished_game, x, y) == BLANKSYM ? CLEARSYM : AT(finished_game, x, y);
+        clear_cells_revealed++;
+        if (isdigit(AT(game, x, y))) continue;
 
         for (int i = -1; i < 2; ++i) {
             for (int j = -1; j < 2; ++j) {
@@ -226,6 +221,7 @@ void dfs(int x, int y)
                     if (AT(visits, nx, ny) == 0) {
                         stackx[countx++] = nx;
                         stacky[county++] = ny;
+                        AT(visits, nx, ny) = 1;
                     }
                 }
             }
@@ -235,50 +231,59 @@ void dfs(int x, int y)
 
 int main()
 {
+    init_board();
+    place_mines();
+    place_numbers();
+
     char buf[255];
-    int x = 0;
-    int y = 0;
     char input;
 
-    init_screen();
-    place_mines();
-    place_numbers(FINISHED_GAME);
-
-    render_with_user_selection(GAME, x, y, true);
+    render(game, true);
     while (!should_close) {
         if (fgets(buf, sizeof(buf), stdin) != NULL) {
             input = buf[0];
             switch (input) {
-            case 'w':
-                if (is_pos_valid(x, y - 1)) {
-                    y--;
+            case 'w': // up
+                if (is_pos_valid(cursor.x, cursor.y - 1)) {
+                    cursor.y--;
                 } break;
-            case 'a':
-                if (is_pos_valid(x - 1, y)) {
-                    x--;
+            case 'a': // left
+                if (is_pos_valid(cursor.x - 1, cursor.y)) {
+                    cursor.x--;
                 } break;
-            case 's':
-                if (is_pos_valid(x, y + 1)) {
-                    y++;
+            case 's': // down
+                if (is_pos_valid(cursor.x, cursor.y + 1)) {
+                    cursor.y++;
                 } break;
-            case 'd':
-                if (is_pos_valid(x + 1, y)) {
-                    x++;
+            case 'd': // right
+                if (is_pos_valid(cursor.x + 1, cursor.y)) {
+                    cursor.x++;
                 } break;
-            case 'y':
-                if (is_pos_valid(x, y)) {
-                    if (AT(FINISHED_GAME, x, y) == MINESYM) {
+            case 'y': // select
+                if (is_pos_valid(cursor.x, cursor.y)) {
+                    if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
+                        render(finished_game, false);
                         printf("Game Over");
-                        render_with_user_selection(FINISHED_GAME, x, y, false);
                         exit(0);
                     } else {
-                        dfs(x, y);
+                        reveal_area();
+                    }
+                } break;
+            case 'f': // flag
+                if (is_pos_valid(cursor.x, cursor.y)) {
+                    AT(game, cursor.x, cursor.y) = FLAGSYM;
+                    if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
+                        bombs_flagged++;
                     }
                 } break;
             }
         }
-
-        render_with_user_selection(GAME, x, y, true);
+        bool win = clear_cells_revealed + bombs_flagged == ROWS * COLS;
+        render(game, !win);
+        if (win) {
+            printf("WIN \n");
+            should_close = true;
+        }
     }
     return 0;
 }
