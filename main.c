@@ -35,6 +35,43 @@ bool should_close = false;
 unsigned int bombs_flagged = 0;
 unsigned int clear_cells_revealed = 0;
 
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+    #include <conio.h>
+
+    char get_input(void) {
+        char ch = _getch();
+        if (ch == 10 || ch == 13) {
+            return '\n';
+        }
+        return ch;
+    }
+
+#else
+    #include <unistd.h>
+    #include <termios.h>
+
+    char get_input(void) {
+        char ch;
+        struct termios oldt, newt;
+        
+        tcgetattr(STDIN_FILENO, &oldt);
+        newt = oldt;
+        
+        newt.c_lflag &= ~(ICANON | ECHO);
+        
+        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+        
+        read(STDIN_FILENO, &ch, 1);
+        
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        
+        if (ch == 10 || ch == 13) {
+            return '\n'
+        }
+        return ch;
+    }
+#endif
+
 void init_board()
 {
     for (size_t i = 0; i < COLS; ++i) {
@@ -79,7 +116,7 @@ void render(char *buff, bool reset)
         putchar('\n');
     }
     if (reset) {
-        printf("\x1b[%dA", ROWS + 2);
+        printf("\x1b[%dA", ROWS + 1);
     }
 }
 
@@ -234,49 +271,51 @@ int main()
     init_board();
     place_mines();
     place_numbers();
-
-    char buf[255];
-    char input;
-
+    
+    printf("WASD     => directions\n");
+    printf("enter    => select\n");
+    printf("f        => flag\n");
+    printf("c        => close\n");
     render(game, true);
+    char input = ' ';
     while (!should_close) {
-        if (fgets(buf, sizeof(buf), stdin) != NULL) {
-            input = buf[0];
-            switch (input) {
-            case 'w': // up
-                if (is_pos_valid(cursor.x, cursor.y - 1)) {
-                    cursor.y--;
-                } break;
-            case 'a': // left
-                if (is_pos_valid(cursor.x - 1, cursor.y)) {
-                    cursor.x--;
-                } break;
-            case 's': // down
-                if (is_pos_valid(cursor.x, cursor.y + 1)) {
-                    cursor.y++;
-                } break;
-            case 'd': // right
-                if (is_pos_valid(cursor.x + 1, cursor.y)) {
-                    cursor.x++;
-                } break;
-            case 'y': // select
-                if (is_pos_valid(cursor.x, cursor.y)) {
-                    if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
-                        render(finished_game, false);
-                        printf("Game Over");
-                        exit(0);
-                    } else {
-                        reveal_area();
-                    }
-                } break;
-            case 'f': // flag
-                if (is_pos_valid(cursor.x, cursor.y)) {
-                    AT(game, cursor.x, cursor.y) = FLAGSYM;
-                    if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
-                        bombs_flagged++;
-                    }
-                } break;
-            }
+        input = get_input();
+        switch (input) {
+        case 'w': // up
+            if (is_pos_valid(cursor.x, cursor.y - 1)) {
+                cursor.y--;
+            } break;
+        case 'a': // left
+            if (is_pos_valid(cursor.x - 1, cursor.y)) {
+                cursor.x--;
+            } break;
+        case 's': // down
+            if (is_pos_valid(cursor.x, cursor.y + 1)) {
+                cursor.y++;
+            } break;
+        case 'd': // right
+            if (is_pos_valid(cursor.x + 1, cursor.y)) {
+                cursor.x++;
+            } break;
+        case '\n': // select
+            if (is_pos_valid(cursor.x, cursor.y)) {
+                if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
+                    render(finished_game, false);
+                    printf("Game Over");
+                    exit(0);
+                } else {
+                    reveal_area();
+                }
+            } break;
+        case 'f': // flag
+            if (is_pos_valid(cursor.x, cursor.y)) {
+                AT(game, cursor.x, cursor.y) = FLAGSYM;
+                if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
+                    bombs_flagged++;
+                }
+            } break;
+        case 'c':
+            should_close = true;
         }
         bool win = clear_cells_revealed + bombs_flagged == ROWS * COLS;
         render(game, !win);
