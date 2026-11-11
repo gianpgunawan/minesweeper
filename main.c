@@ -8,25 +8,28 @@
 #include <string.h>
 #include <ctype.h>
 
-#define ROWS 20
-#define COLS 30
-#define AMOUNT_OF_MINES 60
+#define ROWS 10
+#define COLS 10
+#define AMOUNT_OF_MINES 10
 
 #define AT(buff, x, y) buff[(y) * COLS + (x)]
 
 char finished_game[ROWS*COLS];
 char game[ROWS*COLS];
+bool win = false;
 
-size_t mines[AMOUNT_OF_MINES];
-
-const char MINESYM = '*';
+const char MINESYM  = '*';
 const char BLANKSYM = '-';
 const char CLEARSYM = ' ';
-const char FLAGSYM = 'F';
+const char FLAGSYM  = 'F';
 
 typedef enum {
     RENDER_RESET = 1 << 1,
-    RENDER_BLANKSYM_TO_CLEARSYM = 1 << 2
+    RENDER_BLANKSYM_TO_CLEARSYM = 1 << 2,
+    RENDER_DEBUG = 1 << 3,
+
+    // TODO: implement this using threadings
+    RENDER_BLINKING_CURSOR = 1 << 4,
 } Render_Config; 
 
 // This struct indicates the position of the selector, that is this `[<cell>]`
@@ -141,15 +144,28 @@ void color_cell(char c)
  */
 void render(char *buff, Render_Config config)
 {
+    static char cursor_op = '[';
+    static char cursor_cl = ']';
+    static bool blinking_cursor_toggle = true;
+    if (config&RENDER_BLINKING_CURSOR ) {
+        cursor_op = blinking_cursor_toggle ? ' ' : '[';
+        cursor_cl = blinking_cursor_toggle ? ' ' : ']';
+        blinking_cursor_toggle = !blinking_cursor_toggle;
+    }
+    if (config&RENDER_DEBUG) {
+        printf("cleared cells => %u  ", clear_cells_revealed);
+        printf("flagged bombs => %u", bombs_flagged);
+    }
     putchar('\n');
+
     for (int i = 0; i < ROWS; ++i) {
         for (int j = 0; j < COLS; ++j) {
             char c = buff[i * COLS + j];
             if (config&RENDER_BLANKSYM_TO_CLEARSYM && c == '-') c = ' ';
             if (cursor.x == j && cursor.y == i) {
-                putchar('[');
+                putchar(cursor_op);
                 color_cell(c);
-                putchar(']');
+                putchar(cursor_cl);
             } else if (isdigit(c)) {
                 putchar(' ');
                 color_cell(c);
@@ -179,7 +195,6 @@ TRY_AGAIN:
         }
 
         finished_game[coord] = MINESYM;
-        mines[i] = coord;
     }
 }
 
@@ -292,6 +307,7 @@ void reveal_area()
         x = stackx[--countx];
         y = stacky[--county];
 
+        if (AT(game, x, y) != BLANKSYM) continue;
         if (AT(finished_game, x, y) == MINESYM) continue;
         AT(game, x, y) = AT(finished_game, x, y) == BLANKSYM ? CLEARSYM : AT(finished_game, x, y);
         clear_cells_revealed++;
@@ -318,6 +334,7 @@ int main()
     init_board();
     place_mines();
     place_numbers();
+    unsigned int ingame_render_config = RENDER_RESET | RENDER_DEBUG;
     
     printf("INSTRUCTIONS\n");
     printf("\n");
@@ -325,7 +342,8 @@ int main()
     printf("    <ENTER>  => select\n");
     printf("    <SPACE>  => flag\n");
     printf("    c        => close\n");
-    render(game, RENDER_RESET);
+
+    render(game, ingame_render_config);
     char input = ' ';
     while (1) {
         input = get_input();
@@ -351,11 +369,13 @@ int main()
                 if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
                     goto LOSE;
                 } else {
+                    if (AT(game, cursor.x, cursor.y) != BLANKSYM) break;
                     reveal_area();
                 }
             } break;
         case ' ': // flag
             if (is_pos_valid(cursor.x, cursor.y)) {
+                // toggle flag
                 if (AT(game, cursor.x, cursor.y) == FLAGSYM) {
                    AT(game, cursor.x, cursor.y) = BLANKSYM;
                    if (AT(finished_game, cursor.x, cursor.y) == MINESYM) bombs_flagged--;
@@ -369,11 +389,10 @@ int main()
             goto CLOSE;
         }
 
-        bool win = bombs_flagged == AMOUNT_OF_MINES;
-        win = win || clear_cells_revealed == ROWS * COLS - AMOUNT_OF_MINES;
+        win = (clear_cells_revealed == ROWS * COLS - AMOUNT_OF_MINES);
         if (win) goto WIN;
         
-        render(game, RENDER_RESET);
+        render(game, ingame_render_config);
     }
 // There's literally no reason to use `goto`. I'm gonna be honest, I use `goto`
 // because all cool programmers abuse it ;-).
@@ -386,7 +405,7 @@ LOSE:
     printf("Game Over\n");
     return 0;
 CLOSE:
-    render(game, RENDER_BLANKSYM_TO_CLEARSYM);
+    render(game, 0);
     return 0;
 
     return 0;
