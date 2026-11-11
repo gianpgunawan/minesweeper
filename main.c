@@ -10,7 +10,7 @@
 
 #define ROWS 20
 #define COLS 30
-#define AMOUNT_OF_MINES 100
+#define AMOUNT_OF_MINES 60
 
 #define AT(buff, x, y) buff[(y) * COLS + (x)]
 
@@ -24,13 +24,16 @@ const char BLANKSYM = '-';
 const char CLEARSYM = ' ';
 const char FLAGSYM = 'F';
 
+typedef enum {
+    RENDER_RESET = 1 << 1,
+    RENDER_BLANKSYM_TO_CLEARSYM = 1 << 2
+} Render_Config; 
+
 // This struct indicates the position of the selector, that is this `[<cell>]`
 struct {
-    int x;
-    int y;
+    unsigned int x;
+    unsigned int y;
 } cursor = {0};
-
-bool should_close = false;
 
 unsigned int bombs_flagged = 0;
 unsigned int clear_cells_revealed = 0;
@@ -47,7 +50,6 @@ unsigned int clear_cells_revealed = 0;
     }
 
 #else
-    #include <unistd.h>
     #include <termios.h>
 
     char get_input(void) {
@@ -74,10 +76,10 @@ unsigned int clear_cells_revealed = 0;
 
 void init_board()
 {
-    for (size_t i = 0; i < COLS; ++i) {
-        for (size_t j = 0; j < ROWS; ++j) {
-            finished_game[j * COLS + i] = BLANKSYM;
-            game[j * COLS + i] = BLANKSYM;
+    for (int i = 0; i < ROWS; ++i) {
+        for (int j = 0; j < COLS; ++j) {
+            finished_game[i * COLS + j] = BLANKSYM;
+            game[i * COLS + j] = BLANKSYM;
         }
     }
 }
@@ -90,7 +92,7 @@ int get_random_coord()
         srand(time(NULL));
     }
 
-    return (rand() % (ROWS*COLS + 1));
+    return (rand() % (ROWS*COLS));
 }
 
 void color_cell(char c)
@@ -137,12 +139,13 @@ void color_cell(char c)
  * By selector, I mean `[<cell>]`. x and y are the coordinates of the selector.
  * reset determines wether the cursor is reseted to the top position.
  */
-void render(char *buff, bool reset)
+void render(char *buff, Render_Config config)
 {
     putchar('\n');
-    for (size_t i = 0; i < ROWS; ++i) {
-        for (size_t j = 0; j < COLS; ++j) {
+    for (int i = 0; i < ROWS; ++i) {
+        for (int j = 0; j < COLS; ++j) {
             char c = buff[i * COLS + j];
+            if (config&RENDER_BLANKSYM_TO_CLEARSYM && c == '-') c = ' ';
             if (cursor.x == j && cursor.y == i) {
                 putchar('[');
                 color_cell(c);
@@ -159,7 +162,7 @@ void render(char *buff, bool reset)
         }
         putchar('\n');
     }
-    if (reset) {
+    if (config&RENDER_RESET) {
         printf("\x1b[%dA", ROWS + 1);
     }
 }
@@ -316,13 +319,15 @@ int main()
     place_mines();
     place_numbers();
     
-    printf("WASD     => directions\n");
-    printf("<ENTER>  => select\n");
-    printf("<SPACE>  => flag\n");
-    printf("c        => close\n");
-    render(game, true);
+    printf("INSTRUCTIONS\n");
+    printf("\n");
+    printf("    WASD     => directions\n");
+    printf("    <ENTER>  => select\n");
+    printf("    <SPACE>  => flag\n");
+    printf("    c        => close\n");
+    render(game, RENDER_RESET);
     char input = ' ';
-    while (!should_close) {
+    while (1) {
         input = get_input();
         switch (input) {
         case 'w': // up
@@ -344,29 +349,45 @@ int main()
         case '\n': // select
             if (is_pos_valid(cursor.x, cursor.y)) {
                 if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
-                    render(finished_game, false);
-                    printf("Game Over");
-                    exit(0);
+                    goto LOSE;
                 } else {
                     reveal_area();
                 }
             } break;
         case ' ': // flag
             if (is_pos_valid(cursor.x, cursor.y)) {
-                AT(game, cursor.x, cursor.y) = FLAGSYM;
-                if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
-                    bombs_flagged++;
+                if (AT(game, cursor.x, cursor.y) == FLAGSYM) {
+                   AT(game, cursor.x, cursor.y) = BLANKSYM;
+                   if (AT(finished_game, cursor.x, cursor.y) == MINESYM) bombs_flagged--;
+                   break;
                 }
+                if (AT(game, cursor.x, cursor.y) != BLANKSYM) break;
+                AT(game, cursor.x, cursor.y) = FLAGSYM;
+                if (AT(finished_game, cursor.x, cursor.y) == MINESYM) bombs_flagged++;
             } break;
         case 'c':
-            should_close = true;
+            goto CLOSE;
         }
-        bool win = clear_cells_revealed + bombs_flagged == ROWS * COLS;
-        render(game, !win);
-        if (win) {
-            printf("WIN \n");
-            should_close = true;
-        }
+
+        bool win = bombs_flagged == AMOUNT_OF_MINES;
+        win = win || clear_cells_revealed == ROWS * COLS - AMOUNT_OF_MINES;
+        if (win) goto WIN;
+        
+        render(game, RENDER_RESET);
     }
+// There's literally no reason to use `goto`. I'm gonna be honest, I use `goto`
+// because all cool programmers abuse it ;-).
+WIN:
+    render(game, RENDER_BLANKSYM_TO_CLEARSYM);
+    printf("WIN\n");
+    return 0;
+LOSE:
+    render(finished_game, RENDER_BLANKSYM_TO_CLEARSYM);
+    printf("Game Over\n");
+    return 0;
+CLOSE:
+    render(game, RENDER_BLANKSYM_TO_CLEARSYM);
+    return 0;
+
     return 0;
 }
