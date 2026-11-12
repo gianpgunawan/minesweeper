@@ -34,8 +34,8 @@ typedef enum {
 
 // This struct indicates the position of the selector, that is this `[<cell>]`
 struct {
-    unsigned int x;
-    unsigned int y;
+    int x;
+    int y;
 } cursor = {0};
 
 unsigned int bombs_flagged = 0;
