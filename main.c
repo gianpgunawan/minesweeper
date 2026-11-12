@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
-#include <unistd.h>
 #include <assert.h>
 #include <string.h>
 #include <ctype.h>
@@ -54,6 +53,7 @@ unsigned int clear_cells_revealed = 0;
 
 #else
     #include <termios.h>
+    #include <unistd.h>
 
     char get_input(void) {
         char ch;
