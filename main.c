@@ -7,15 +7,21 @@
 #include <string.h>
 #include <ctype.h>
 
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+    #include <windows.h>
+#endif
+
 #define ROWS 10
-#define COLS 10
-#define AMOUNT_OF_MINES 10
+#define COLS 20
+#define AMOUNT_OF_MINES 30
 
 #define AT(buff, x, y) buff[(y) * COLS + (x)]
 
 char finished_game[ROWS*COLS];
 char game[ROWS*COLS];
+bool has_select_any_cell_at_all = false;
 bool win = false;
+volatile LONG user_input = ' ';
 
 const char MINESYM  = '*';
 const char BLANKSYM = '-';
@@ -40,6 +46,8 @@ struct {
 unsigned int bombs_flagged = 0;
 unsigned int clear_cells_revealed = 0;
 
+void process_input(void);
+
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
     #include <conio.h>
 
@@ -51,6 +59,17 @@ unsigned int clear_cells_revealed = 0;
         return ch;
     }
 
+    DWORD WINAPI get_input_in_another_thread(LPVOID lpParam) {
+        while (1) {
+            char ch = _getch();
+            if (ch == 10 || ch == 13) {
+                ch = '\n';
+            }
+            InterlockedExchange(&user_input, ch);
+            process_input();
+        }
+        return 0;
+    }
 #else
     #include <termios.h>
     #include <unistd.h>
@@ -100,8 +119,7 @@ int get_random_coord()
 
 void color_cell(char c)
 {
-    putchar('\033');
-    putchar('[');
+    putchar('\033'); putchar('[');
     switch (c) {
     case '1':
         putchar('3'); putchar('4'); // blue
@@ -124,10 +142,7 @@ void color_cell(char c)
     case '7':
         putchar('3'); putchar('0'); // black
         break;
-    case '8':
-    case '[':
-    case ']':
-    case 'F':
+    case '8': case '[': case ']': case 'F':
         putchar('3'); putchar('7');
         break;
     default:
@@ -146,8 +161,8 @@ void render(char *buff, Render_Config config)
 {
     static char cursor_op = '[';
     static char cursor_cl = ']';
-    static bool blinking_cursor_toggle = true;
-    if (config&RENDER_BLINKING_CURSOR ) {
+    static bool blinking_cursor_toggle = false;
+    if (config&RENDER_BLINKING_CURSOR) {
         cursor_op = blinking_cursor_toggle ? ' ' : '[';
         cursor_cl = blinking_cursor_toggle ? ' ' : ']';
         blinking_cursor_toggle = !blinking_cursor_toggle;
@@ -179,7 +194,7 @@ void render(char *buff, Render_Config config)
         putchar('\n');
     }
     if (config&RENDER_RESET) {
-        printf("\x1b[%dA", ROWS + 1);
+        printf("\033[%dA", ROWS + 1);
     }
 }
 
@@ -187,11 +202,16 @@ void place_mines()
 {
     for (size_t i = 0; i < AMOUNT_OF_MINES; ++i) {
         int coord;
-TRY_AGAIN:
-        coord = get_random_coord();
-
-        if (finished_game[coord] == MINESYM) {
-            goto TRY_AGAIN;
+        while (1) {
+            coord = get_random_coord();
+            if (finished_game[coord] == MINESYM
+                // do not fill the cell that the user initially chooses at the
+                // start of the game with a mine.
+                || cursor.x + cursor.y * COLS == coord 
+            ) {
+                continue;
+            }
+            break;
         }
 
         finished_game[coord] = MINESYM;
@@ -329,12 +349,86 @@ void reveal_area()
     }
 }
 
-int main()
+void process_input()
 {
+    switch ((char)user_input) {
+    case 'w': // up
+        if (is_pos_valid(cursor.x, cursor.y - 1)) {
+            cursor.y--;
+        } break;
+    case 'a': // left
+        if (is_pos_valid(cursor.x - 1, cursor.y)) {
+            cursor.x--;
+        } break;
+    case 's': // down
+        if (is_pos_valid(cursor.x, cursor.y + 1)) {
+            cursor.y++;
+        } break;
+    case 'd': // right
+        if (is_pos_valid(cursor.x + 1, cursor.y)) {
+            cursor.x++;
+        } break;
+    case '\n': // select
+        if (is_pos_valid(cursor.x, cursor.y)) {
+            // Make sure that the player wouldn't click any cell for the
+            // first time and get surprised by a mine.
+            if (!has_select_any_cell_at_all) {
+                has_select_any_cell_at_all = true;
+                place_mines();
+                place_numbers();
+            }
+            if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
+                goto LOSE;
+            } else {
+                if (AT(game, cursor.x, cursor.y) != BLANKSYM) break;
+                reveal_area();
+            }
+        } break;
+    case ' ': // flag
+        if (is_pos_valid(cursor.x, cursor.y)) {
+            // toggle flag
+            if (AT(game, cursor.x, cursor.y) == FLAGSYM) {
+               AT(game, cursor.x, cursor.y) = BLANKSYM;
+               if (AT(finished_game, cursor.x, cursor.y) == MINESYM) bombs_flagged--;
+               break;
+            }
+            if (AT(game, cursor.x, cursor.y) != BLANKSYM) break;
+            AT(game, cursor.x, cursor.y) = FLAGSYM;
+            if (AT(finished_game, cursor.x, cursor.y) == MINESYM) bombs_flagged++;
+        } break;
+    case 'c':
+        goto CLOSE;
+    }
+
+    win = (clear_cells_revealed == ROWS * COLS - AMOUNT_OF_MINES);
+    if (win) goto WIN;
+    return;
+
+// There's literally no reason to use `goto`. I'm gonna be honest, I use `goto`
+// because all cool programmers abuse it ;-).
+WIN:
+    render(game, RENDER_BLANKSYM_TO_CLEARSYM);
+    printf("WIN\n");
+    exit(0);
+LOSE:
+    render(finished_game, RENDER_BLANKSYM_TO_CLEARSYM);
+    printf("Game Over\n");
+    exit(0);
+CLOSE:
+    render(game, 0);
+    exit(0);
+
+}
+
+int main(int argc, char **argv)
+{
+    HANDLE thread = CreateThread(NULL, 0, get_input_in_another_thread, NULL, 0, NULL);
+    if (thread == NULL) {
+        return 1;
+    }
+
     init_board();
-    place_mines();
-    place_numbers();
-    unsigned int ingame_render_config = RENDER_RESET | RENDER_DEBUG;
+    unsigned int ingame_render_config = RENDER_RESET | RENDER_BLINKING_CURSOR;
     
     printf("INSTRUCTIONS\n");
     printf("\n");
@@ -344,69 +438,10 @@ int main()
     printf("    c        => close\n");
 
     render(game, ingame_render_config);
-    char input = ' ';
     while (1) {
-        input = get_input();
-        switch (input) {
-        case 'w': // up
-            if (is_pos_valid(cursor.x, cursor.y - 1)) {
-                cursor.y--;
-            } break;
-        case 'a': // left
-            if (is_pos_valid(cursor.x - 1, cursor.y)) {
-                cursor.x--;
-            } break;
-        case 's': // down
-            if (is_pos_valid(cursor.x, cursor.y + 1)) {
-                cursor.y++;
-            } break;
-        case 'd': // right
-            if (is_pos_valid(cursor.x + 1, cursor.y)) {
-                cursor.x++;
-            } break;
-        case '\n': // select
-            if (is_pos_valid(cursor.x, cursor.y)) {
-                if (AT(finished_game, cursor.x, cursor.y) == MINESYM) {
-                    goto LOSE;
-                } else {
-                    if (AT(game, cursor.x, cursor.y) != BLANKSYM) break;
-                    reveal_area();
-                }
-            } break;
-        case ' ': // flag
-            if (is_pos_valid(cursor.x, cursor.y)) {
-                // toggle flag
-                if (AT(game, cursor.x, cursor.y) == FLAGSYM) {
-                   AT(game, cursor.x, cursor.y) = BLANKSYM;
-                   if (AT(finished_game, cursor.x, cursor.y) == MINESYM) bombs_flagged--;
-                   break;
-                }
-                if (AT(game, cursor.x, cursor.y) != BLANKSYM) break;
-                AT(game, cursor.x, cursor.y) = FLAGSYM;
-                if (AT(finished_game, cursor.x, cursor.y) == MINESYM) bombs_flagged++;
-            } break;
-        case 'c':
-            goto CLOSE;
-        }
-
-        win = (clear_cells_revealed == ROWS * COLS - AMOUNT_OF_MINES);
-        if (win) goto WIN;
-        
         render(game, ingame_render_config);
+        Sleep(200);
     }
-// There's literally no reason to use `goto`. I'm gonna be honest, I use `goto`
-// because all cool programmers abuse it ;-).
-WIN:
-    render(game, RENDER_BLANKSYM_TO_CLEARSYM);
-    printf("WIN\n");
-    return 0;
-LOSE:
-    render(finished_game, RENDER_BLANKSYM_TO_CLEARSYM);
-    printf("Game Over\n");
-    return 0;
-CLOSE:
-    render(game, 0);
-    return 0;
 
     return 0;
 }
